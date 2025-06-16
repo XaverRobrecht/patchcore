@@ -1,10 +1,10 @@
 from sklearn.metrics import roc_auc_score
 import os
-from anomalytool import model_generation
+from patchcore import model_generation
 from tqdm import tqdm
 from PIL import Image
 import numpy as np
-from anomalytool.postprocessing import generateHeatmap
+from patchcore.postprocessing import generateHeatmap
 
 def getFilesinDir(directory):
     image_files = []
