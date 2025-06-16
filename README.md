@@ -1,7 +1,7 @@
 # PatchCore
 
 This repository contains a simple implementation of the PatchCore anomaly detection algorithm, which is based on the paper "PatchCore: Efficient Patch-based Outlier Detection" by R. Schneider et al. (2022). The implementation is designed to be straightforward and easy to use, with a focus on clarity and simplicity.
-Also the PatchCore classifyer is implemented as custom torch module, enabling easy integration into PyTorch-based workflows or export to production environments vio ONNX or similar frameworks.
+Also the PatchCore classifier is implemented as custom torch module, enabling easy integration into PyTorch-based workflows or export to production environments via ONNX or similar frameworks.
 
 For a reference on how to use the package, please see `example.py`. This script demonstrates typical usage patterns and can serve as a starting point for your own applications.
 
