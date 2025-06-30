@@ -13,7 +13,7 @@ class ImageLoader:
         mask (list[list[tuple]]): List of polygons, each polygon is a list of (x, y) tuples.
         device (string): Torch device to load tensors into.
     """
-    def __init__(self, crop_tuple=None, target_size=None, sigma=0, mask=None,device = "cpu"):
+    def __init__(self, crop_tuple=None, target_size=None, sigma=0, mask=None,device = "cpu", additional_transform = None):
         """
         Initializes the ImageLoader.
 
@@ -59,6 +59,7 @@ class ImageLoader:
         for polygon in self.mask:
             ImageDraw.Draw(mask).polygon(polygon, fill=255)
         masked_image = Image.composite(img, blurred, mask)
+
         return masked_image
 
     def load_image_as_tensor(self, file):

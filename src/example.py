@@ -1,10 +1,10 @@
 from sklearn.metrics import roc_auc_score
 import os
 from patchcore import model_generation
+from patchcore.models import OriginalAggregator
 from tqdm import tqdm
-from PIL import Image
 import numpy as np
-from patchcore.postprocessing import generateHeatmap
+from PIL import Image
 
 def getFilesinDir(directory):
     image_files = []
@@ -14,48 +14,53 @@ def getFilesinDir(directory):
             path_to_file = os.path.join(path_to_subdir, file)
             if os.path.isfile(path_to_file):
                 image_files.append(path_to_file)
-    return image_files
-
-   
+    return image_files   
 
 mvtec_dir = "/home/xaver/Downloads/mvtec_anomaly_detection/"
-batch_size = 1
+batch_size = 2
 device="cpu"
 
-for perc in [1]:
-    with open(f"./results_{perc}.txt","w") as resFile:
-        resFile.write("Dataset \t  Score \n")
 
-    # Assign directory
-    for dataset in os.listdir(mvtec_dir):
-        if not os.path.isdir(os.path.join(mvtec_dir,dataset)):
-            continue
-        directory = os.path.join(mvtec_dir,f"{dataset}/train")
-        image_files = getFilesinDir(directory)
-        backbone = model_generation.createWideResnet50Backbone([2,3],3)
+subsampling_percentage=1
 
-        #calculate crop shapes to reseble what was used in the paper
-        crop_tuple = []
-        with Image.open(image_files[0]) as im:
-            width,height = im.size
-            assert width == height, "image is not square"
-            cutoff = width*(1-224.0/256.0)
-            cutoff = cutoff/2
-            crop_tuple = (cutoff,cutoff,width-cutoff,height-cutoff)
+with open(f"./results_{subsampling_percentage}.txt","w") as resFile:
+    resFile.write("Dataset \t  Score \n")
 
-        scorer,loader = model_generation.train_patchcore(image_files, 
-                                                         backbone, 
-                                                         n_percent=perc, 
-                                                         batch_size=batch_size, 
-                                                         device=device, 
-                                                         b=15, 
-                                                         crop_tuple=crop_tuple)
-        directory = os.path.join(mvtec_dir,f"{dataset}/test")
-        image_files = getFilesinDir(directory)
-        
-        batched_files = [image_files[i:i + batch_size] 
-                         for i in range(0, len(image_files), batch_size) 
-        ]
+for dataset in os.listdir(mvtec_dir):
+    if not os.path.isdir(os.path.join(mvtec_dir,dataset)):
+        continue
+    directory = os.path.join(mvtec_dir,f"{dataset}/train")
+    image_files = getFilesinDir(directory)
+    
+    #model creatio
+
+    
+    crop_shape=[]
+    #cropping as WideResNet50 imagenetv1 proposes
+    with Image.open(image_files[0]) as im:
+        height,width = im.size
+        assert height == width, "images must be square"
+        crop = height * (1-224/256.0)
+        crop = int(crop/2)
+        crop_shape = (crop,crop,width-crop,height-crop)
+
+    scorer,loader = model_generation.train_patchcore(image_files, 
+                                                        n_percent=subsampling_percentage, 
+                                                        batch_size=batch_size,
+                                                        device=device, 
+                                                        crop_tuple=crop_shape,
+                                                        target_dim=None)
+    
+    directory = os.path.join(mvtec_dir,f"{dataset}/test")
+    image_files = getFilesinDir(directory)
+    
+    batched_files = [image_files[i:i + batch_size] 
+                        for i in range(0, len(image_files), batch_size) 
+    ]
+    score = []
+    b_vals = [1,3,5,10,15,20]
+    for b in b_vals:
+        scorer.set_b(b)
         scores = [ 
             scorer(loader.load_images_as_tensor(x))  
             for x in tqdm(batched_files,"scoring images",leave=False) 
@@ -72,27 +77,14 @@ for perc in [1]:
         ])
         
         mask = ["good" not in x for x in image_files]
-        score = roc_auc_score(mask,image_scores)
+        score.append(roc_auc_score(mask,image_scores))
         
-        #save results
-        print("\n",f"score in {dataset} is {score}")
-        with open(f"./results_{perc}.txt","a") as resFile:
-            resFile.write(f"{dataset} \t  {score} \n")
+    
+    idx = np.argmax(score)
+    score = score[idx]
+    b = b_vals[idx]
 
-        #save segmentation
-        savedir = f"./{dataset}_{perc}"
-        if not os.path.isdir(savedir):
-            os.mkdir(savedir)
-        else:
-            for fn in os.listdir(savedir):
-                os.remove(os.path.join(savedir,fn))
-        
-        #generate segmentations
-        #pixel_th = pixel_scores[np.logical_not(mask)].max()
-        #for i,image_file in enumerate(image_files):
-        #    org_name = image_file.split("/")
-        #    org_name = org_name[-2]+"_"+org_name[-1]
-        #    fn = org_name + f"_{image_scores[i]:.3f}.png"
-        #    segmentation = generateHeatmap(pixel_scores[i],image_file,pixel_th, crop_tuple=crop_tuple)
-        #    segmentation.save(os.path.join(savedir,fn))
-        
+    #save results
+    print(f"score in {dataset} is {score} for b = {b}")
+    with open(f"./results_{subsampling_percentage}.txt","a") as resFile:
+        resFile.write(f"score in {dataset} is {score} for b = {b}, p= {3} \n")
