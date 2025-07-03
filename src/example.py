@@ -1,10 +1,11 @@
 from sklearn.metrics import roc_auc_score
 import os
 from patchcore import model_generation
-from patchcore.models import OriginalAggregator
+from patchcore.models import AverageAggregator, OriginalAggregator
 from tqdm import tqdm
 import numpy as np
 from PIL import Image
+from random import shuffle
 
 def getFilesinDir(directory):
     image_files = []
@@ -17,7 +18,7 @@ def getFilesinDir(directory):
     return image_files   
 
 mvtec_dir = "/home/xaver/Downloads/mvtec_anomaly_detection/"
-batch_size = 2
+batch_size = 1
 device="cpu"
 
 
@@ -26,7 +27,9 @@ subsampling_percentage=1
 with open(f"./results_{subsampling_percentage}.txt","w") as resFile:
     resFile.write("Dataset \t  Score \n")
 
-for dataset in os.listdir(mvtec_dir):
+datasets = os.listdir(mvtec_dir)
+shuffle(datasets)
+for dataset in datasets:
     if not os.path.isdir(os.path.join(mvtec_dir,dataset)):
         continue
     directory = os.path.join(mvtec_dir,f"{dataset}/train")
@@ -45,6 +48,7 @@ for dataset in os.listdir(mvtec_dir):
         crop_shape = (crop,crop,width-crop,height-crop)
 
     scorer,loader = model_generation.train_patchcore(image_files, 
+                                                        aggregator=AverageAggregator(patch_size=3),
                                                         n_percent=subsampling_percentage, 
                                                         batch_size=batch_size,
                                                         device=device, 
@@ -58,7 +62,7 @@ for dataset in os.listdir(mvtec_dir):
                         for i in range(0, len(image_files), batch_size) 
     ]
     score = []
-    b_vals = [1,3,5,10,15,20]
+    b_vals = [1]
     for b in b_vals:
         scorer.set_b(b)
         scores = [ 

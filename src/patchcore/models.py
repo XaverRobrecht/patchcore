@@ -15,7 +15,6 @@ class FeatureExtractor(nn.Module):
         mean (list, optional): Mean for normalization. Defaults to ImageNet mean.
         std (list, optional): Standard deviation for normalization. Defaults to ImageNet std.
         input_size (tuple, optional): Input image size (H, W). Defaults to (224, 224).
-        pooling_size (int, optional): Size of the average pooling kernel. Defaults to 3.
     """
     def __init__(
         self,
@@ -33,8 +32,6 @@ class FeatureExtractor(nn.Module):
             model (nn.Module): Backbone model to extract features from.
             mean (list, optional): Mean for normalization. Defaults to ImageNet mean.
             std (list, optional): Standard deviation for normalization. Defaults to ImageNet std.
-            input_size (tuple, optional): Input image size (H, W). Defaults to (224, 224).
-            pooling_size (int, optional): Size of the average pooling kernel. Defaults to 3.
         """
         super(FeatureExtractor, self).__init__()
         self.model = create_feature_extractor(
@@ -99,11 +96,43 @@ class OriginalAggregator(torch.nn.Module):
         batch,channels,height,width,patch = scaled_features.shape 
         scaled_features = scaled_features.reshape((-1,height*width*patch))
 
-        patched_features = torch.adaptive_avg_pool1d(scaled_features,self.pretrain_embed_dimension).reshape((batch,channels,self.pretrain_embed_dimension))
-        patched_features = torch.adaptive_avg_pool1d(patched_features,self.target_embed_dimension)
+        aggregated_features = torch.adaptive_avg_pool1d(scaled_features,self.pretrain_embed_dimension).reshape((batch,channels,self.pretrain_embed_dimension))
+        aggregated_features = torch.adaptive_avg_pool1d(aggregated_features,self.target_embed_dimension)
         h = w = torch.sqrt(torch.as_tensor(self.target_embed_dimension)).to(torch.int64)
-        patched_features = patched_features.reshape((batch,channels,h,w))
-        features = torch.permute(patched_features, (0, 2, 3,1))
+        aggregated_features = aggregated_features.reshape((batch,channels,h,w))
+        features = torch.permute(aggregated_features, (0, 2, 3,1))
+        return features
+    
+class AverageAggregator(torch.nn.Module):
+    def __init__(self,patch_size):
+        super(AverageAggregator, self).__init__()
+        self.patch_size = patch_size
+    
+    @torch.no_grad
+    def forward(self,backbone_outputs):
+        fmp_height = max([ft.shape[2] for ft in backbone_outputs])
+        fmp_width = max([ft.shape[3] for ft in backbone_outputs])
+        scaled_features = []
+        for fmp in backbone_outputs:
+            batch,channels,_,_ = fmp.shape
+            padding = (self.patch_size-1)//2
+            patched_features = F.unfold(fmp,(self.patch_size,self.patch_size),padding=(padding,padding))
+            h = w = torch.sqrt(torch.as_tensor(patched_features.shape[-1])).to(torch.int64)
+            patched_features = patched_features.reshape((batch,-1,h,w))
+            patched_features = F.interpolate(patched_features,
+                                             (fmp_height,fmp_width),
+                                             mode="bilinear",
+                                             align_corners=False,)
+            patched_features = patched_features.reshape((batch,channels,-1,fmp_height,fmp_width))
+            patched_features = torch.permute(patched_features,(0,1,3,4,2))
+            scaled_features.append(patched_features)
+
+        scaled_features = torch.cat(scaled_features,dim=1)
+        #batch,channels,height,width,patch = scaled_features.shape 
+        aggregated_features = scaled_features.mean(dim=4)
+        
+        #channels last
+        features = torch.permute(aggregated_features, (0, 2, 3,1))
         return features
     
 class OriginalScorer(torch.nn.Module):

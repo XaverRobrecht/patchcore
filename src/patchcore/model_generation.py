@@ -3,8 +3,7 @@ from .preprocessing import ImageLoader
 from torchvision.models import resnet50,wide_resnet50_2, Wide_ResNet50_2_Weights,ResNet50_Weights
 from tqdm import tqdm
 import torch
-from random import shuffle
-import numpy as np
+from random import randint
 
 def createWideResnet50Backbone(layer_nums):
     layer_nums.sort()
@@ -47,6 +46,7 @@ def subsample_vectorset(vector_set, n_sample,device=None,target_dim = None):
         else:
             device="cpu"
     
+    #handle subsampling
     vs = vector_set
     if target_dim is not None:
         if target_dim <=0 :
@@ -54,28 +54,34 @@ def subsample_vectorset(vector_set, n_sample,device=None,target_dim = None):
             bank_size = torch.as_tensor(vector_set.shape[0],dtype = torch.float32,device=device)
             target_dim = (4*torch.log(bank_size)/(eps**2/2.0 - eps**3/3.0)).to(dtype=torch.int64)
         vs = random_projection(vs,target_dim,device)
-    idx = torch.zeros(n_sample,dtype = torch.int64).to(device)
-    random_base = list(range(0,vector_set.shape[0]))
-    shuffle(random_base)
-    max_idx = int(len(idx)/100)+1
+    
 
-    idx[0] = torch.argmax((vs**2).sum(1).to(device))
+    idx = [randint(0,int(vs.shape[0]))]
     dists = ((vs[idx[0]]-vs)**2).sum(1).to(device)
-    for i in tqdm(range(max_idx,n_sample),"subsampling memory bank",leave=False):
-        dists,idx[i] = _getCandidate(vs, dists)
+    
+    #constant term for distance computation
+    cT = torch.pow(vs,2).sum(1).unsqueeze(0)
+    
+    #aas torch.compile does not work on windows with gpu, for now its jit.trace
+    gC = torch.jit.trace(_getCandidate,(vs[idx[0]],dists,vs,cT))
+    for i in tqdm(range(1,n_sample),"subsampling memory bank",leave=False):
+        current_idx = torch.argmax(dists)
+        dists,= gC(vs[current_idx], dists,vs,cT)
+        idx.append(current_idx)
+    idx = torch.as_tensor(idx).to(device)
     return vector_set[idx].to("cpu")
 
-@torch.compile()
-def _getCandidate(bank, dists):
-    idx = torch.argmax(dists)
-    dists2 = ((bank[idx]-bank)**2).sum(1)
+@torch.no_grad
+def _getCandidate(fv, dists,vs,cT):
+    fv=fv.unsqueeze(0)
+    dists2 = torch.pow(fv,2).sum(1).unsqueeze(1)+cT + -2*(fv.matmul(vs.T))
     dists = torch.minimum(dists,dists2)
-    return dists,torch.argmax(dists)
+    return dists
 
 @torch.no_grad
 def random_projection(matrix,target_dimension,device = None):
     """performs a random projection of the given matrix to the target dimension.
-    The projection is created by sampling from a normal distribution with standard deviation 1/sqrt(n) where n is the number of vectors in the matrix.
+    The projection is created by sampling from a normal distribution with standard deviation 1/sqrt(n) where n is the dimensionality of the target space.
     If the device is not specified, it will choose the first available gpu or cpu."""
     if device is None:
         if torch.cuda.is_available():
@@ -85,10 +91,10 @@ def random_projection(matrix,target_dimension,device = None):
         else:
             device="cpu"
     std = torch.zeros((matrix.shape[1],target_dimension),dtype=torch.float32)
-    std += 1.0/matrix.flatten().shape[0]
+    std += 1.0/target_dimension
     std = torch.sqrt(std)
     projection = torch.normal(std=std,mean=0*std).to(device)
-    return matrix.matmul(projection)
+    return matrix.to(device).matmul(projection)
 
 def train_patchcore(training_files, 
                     backbone = createWideResnet50Backbone([2,3]), 
@@ -100,15 +106,33 @@ def train_patchcore(training_files,
                     target_dim=None,
                     mask=None, 
                     batch_size=1, 
-                    additional_transform = None,
                     device="cpu"):
+    """Utility function to train a patchcore anomaly detector
 
+    Args:
+        training_files (list(str)): list of strings containing the path to the training images
+        backbone (torch.nn.module, optional): Model used to extract fecture vectors from image. Defaults to ideResnet50 with ooutput layers 2,3.
+        aggregator (torch.nn.module, optional): Module that perfomrs the aggregation on the extracted features. Defaults to OriginalAggregator(3,1024,1024), which is what the paper bechmark used.
+        n_percent (int, optional): percentage of feature vectors in memory bank to keep. Defaults to 25.
+        b (int, optional): number of nearest neighbours used when scoring images. Defaults to 10.
+        sigma (int, optional): standard deviation of gaussian kernel used to smooth background outside masked region. Defaults to 4.
+        crop_tuple (Tuple[int,int,int,int], optional): tuple used to crop pillow image with, corresponds to (left,upper,right,lower). Defaults to None/no cropping.
+        target_dim (int, optional): Specifies if a random projection is used during subsampling. Defaults to None(=no random projection), if <=0  dimension will be chosen automatically.
+        mask (list[list[tuple]], optional): polygons used to crop a part of a certain image. Defaults to None(=no cropping).
+        batch_size (int, optional): Batch size used to extract memory bank. Defaults to 1.
+        device (str, optional): torch device to run models on. Defaults to "cpu".
+
+    Raises:
+        ValueError
+
+    Returns:
+        torch.nn.module: trained patchcore classifier
+    """
     
     image_loader = ImageLoader(crop_tuple=crop_tuple,
                                       sigma=sigma,
                                       mask=mask,
-                                      device=device,
-                                      additional_transform=additional_transform)
+                                      device=device)
     
     feature_extractor = backbone
     feature_extractor.eval()
