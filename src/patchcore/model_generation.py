@@ -62,7 +62,7 @@ def subsample_vectorset(vector_set, n_sample,device=None,target_dim = None):
     #constant term for distance computation
     cT = torch.pow(vs,2).sum(1).unsqueeze(0)
     
-    #aas torch.compile does not work on windows with gpu, for now its jit.trace
+    #as torch.compile does not work on windows with gpu, for now its jit.trace
     gC = torch.jit.trace(_getCandidate,(vs[idx[0]],dists,vs,cT))
     for i in tqdm(range(1,n_sample),"subsampling memory bank",leave=False):
         current_idx = torch.argmax(dists)
