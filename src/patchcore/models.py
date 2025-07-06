@@ -137,13 +137,11 @@ class AverageAggregator(torch.nn.Module):
     
 class OriginalScorer(torch.nn.Module):
     """
-    Computes anomaly scores for feature maps using a memory bank.
+    Computes anomaly scores for feature maps using a memory bank, as described in the patchcore paper.
 
     Args:
         memory_bank (torch.Tensor): Memory bank of feature vectors (N, C).
         b (int): Number of nearest neighbors to use for scoring.
-        scale_width (int): Output width for pixel scores.
-        scale_height (int): Output height for pixel scores.
     """
     def __init__(self, memory_bank, b):
         """
@@ -152,8 +150,6 @@ class OriginalScorer(torch.nn.Module):
         Args:
             memory_bank (torch.Tensor): Memory bank of feature vectors (N, C).
             b (int): Number of nearest neighbors to use for scoring.
-            scale_width (int): Output width for pixel scores.
-            scale_height (int): Output height for pixel scores.
         """
         super(Scorer, self).__init__()
         self.mb = torch.nn.Parameter(memory_bank,requires_grad = False)
@@ -211,13 +207,13 @@ class OriginalScorer(torch.nn.Module):
 
 class Scorer(torch.nn.Module):
     """
-    Computes anomaly scores for feature maps using a memory bank.
+    Computes anomaly scores for feature maps using a memory bank. 
+    This differs to what the paper describes, as it does not use the nearest neighbours of the memory bank, but the nearest neighbours of the tested images feature vector.
+    Results are the same in almost all cases and if they differ they only differ slightly. Also this version is a good deal faster than the OriginalScorer.
 
     Args:
         memory_bank (torch.Tensor): Memory bank of feature vectors (N, C).
         b (int): Number of nearest neighbors to use for scoring.
-        scale_width (int): Output width for pixel scores.
-        scale_height (int): Output height for pixel scores.
     """
     def __init__(self, memory_bank, b):
         """
@@ -226,8 +222,6 @@ class Scorer(torch.nn.Module):
         Args:
             memory_bank (torch.Tensor): Memory bank of feature vectors (N, C).
             b (int): Number of nearest neighbors to use for scoring.
-            scale_width (int): Output width for pixel scores.
-            scale_height (int): Output height for pixel scores.
         """
         super(Scorer, self).__init__()
         self.mb = torch.nn.Parameter(memory_bank,requires_grad = False)
@@ -274,7 +268,7 @@ class PatchCore(torch.nn.Module):
         feature_extractor (nn.Module): Feature extractor module.
         sigma (float): Standard deviation for Gaussian blur.
     """
-    def __init__(self, feature_extractor, aggregator, scorer, sigma):
+    def __init__(self, feature_extractor, aggregator, scorer, sigma=4):
         """
         Initializes the PatchCore model.
 
@@ -310,7 +304,7 @@ class PatchCore(torch.nn.Module):
             input_tensor (torch.Tensor): Input image tensor of shape (B, C, H, W).
 
         Returns:
-            Tuple[torch.Tensor, torch.Tensor]: Pixel-wise anomaly scores and image-level anomaly scores.
+            Tuple[torch.Tensor, torch.Tensor]: Image-level and Pixel-wise anomaly scores.
         """
         # Ensure batch dimension exists
         if len(input_tensor.shape) < 4:
