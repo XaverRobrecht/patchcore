@@ -40,7 +40,7 @@ class ImageLoader:
             PIL.Image: The processed image.
         """
         img = Image.open(file).convert("RGB")
-
+        org_size = img.size
         if self.crop_tuple is not None:
             img = img.crop(self.crop_tuple)
         
@@ -55,9 +55,10 @@ class ImageLoader:
         else:
             blurred = img.filter(ImageFilter.GaussianBlur(radius=self.sigma))
 
-        mask = Image.new("L", img.size)
+        mask = Image.new("L", org_size)
         for polygon in self.mask:
             ImageDraw.Draw(mask).polygon(polygon, fill=255)
+        mask = mask.crop(self.crop_tuple).resize(self.target_size)
         masked_image = Image.composite(img, blurred, mask)
 
         return masked_image
